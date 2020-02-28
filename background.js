@@ -34,28 +34,46 @@ async function getHighlightedTabs(tab) {
   }
 }
 
+async function activateTab(tab) {
+  if (tab.active) {
+    return;
+  }
+  return new Promise(resolve => {
+    const listener = activeInfo => {
+      if (activeInfo.tabId != tab.id) {
+        return;
+      }
+      browser.tabs.onActivated.removeListener(listener);
+      resolve();
+    };
+    browser.tabs.onActivated.addListener(listener);
+    browser.tabs.update(tab.id, { active: true });
+  });
+}
+
 browser.menus.onClicked.addListener(async (info, tab) => {
   const tabs = await getHighlightedTabs(tab);
   if (tabs.every(tab => tab.discarded)) {
     return;
   }
-  const ids = tabs.map(tab => tab.id);
   if (prependSnowflake) {
     // Try to prepend a snowflake before the title,
     // before discarding the tab.
-    const errors = [];
-    await Promise.all(ids.map(id => browser.tabs.executeScript(id, {
-      runAt: "document_start",
-      code: CODE_SHOW_SNOWFLAKE,
-    }).catch(error => {
-      errors.push(error);
-      console.error(error, `tab id: ${id}`);
-    })));
-    if (errors.length > 0) {
-      // This can happen if the tab is a privileged page, e.g. about:addons.
+    for (const tab of tabs) {
+      await activateTab(tab);
+      try {
+        await browser.tabs.executeScript(tab.id, {
+          runAt: "document_start",
+          code: CODE_SHOW_SNOWFLAKE,
+        });
+      }
+      catch (error) {
+        // This can happen if the tab is a privileged page, e.g. about:addons.
+        console.error(error, `tab id: ${tab.id}`);
+      }
     }
   }
-  browser.tabs.discard(ids);
+  browser.tabs.discard(tabs.map(tab => tab.id));
 });
 
 browser.storage.onChanged.addListener((changes) => {
